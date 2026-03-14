@@ -1,0 +1,41 @@
+{
+  "name": "planemap",
+  "author": "CasCasey",
+  "version": "1.0.0",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "pebble": {
+    "displayName": "Plane Map",
+    "uuid": "3a375aaa-91b1-4dc3-8430-b87c1255843b",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "aplite",
+      "basalt",
+      "diorite",
+      "flint"
+    ],
+    "watchapp": {
+      "watchface": false
+    },
+    "messageKeys": [
+      "KEY_STATUS",
+      "PLANES_DATA",
+      "KEY_ZOOM_IN",
+      "KEY_ZOOM_OUT",
+      "KEY_CURRENT_RADIUS"
+    ],
+    "resources": {
+      "media": [
+        {
+          "type": "bitmap",
+          "name": "MENU_ICON",
+          "file": "images/plane.png",
+          "menuIcon": true
+        }
+      ]
+    }
+  }
+}
