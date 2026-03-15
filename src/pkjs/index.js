@@ -149,6 +149,37 @@ Pebble.addEventListener('appmessage', function(e) {
   } else if (dict.KEY_ZOOM_OUT) {
     if (current_radius < 50) current_radius += 5;
     getPlanes();
+  } else if (dict.KEY_REQUEST_ROUTE) {
+    var callsign = dict.KEY_REQUEST_ROUTE;
+    if (!callsign || callsign.trim() === "") {
+        Pebble.sendAppMessage({ 'ROUTE_DATA': 'Unknown Route' });
+        return;
+    }
+    
+    var route_url = "https://api.adsbdb.com/v0/callsign/" + callsign.trim();
+    var route_xhr = new XMLHttpRequest();
+    route_xhr.onload = function() {
+        if (this.status === 200) {
+            try {
+                var rJson = JSON.parse(this.responseText);
+                var route = rJson.response.flightroute;
+                if (route && route.origin && route.destination) {
+                    var o = route.origin.iata_code || route.origin.icao_code;
+                    var d = route.destination.iata_code || route.destination.icao_code;
+                    Pebble.sendAppMessage({ 'ROUTE_DATA': o + ' -> ' + d });
+                    return;
+                }
+            } catch(e) {
+                console.log("Error parsing route: " + e);
+            }
+        }
+        Pebble.sendAppMessage({ 'ROUTE_DATA': 'Unknown Route' });
+    };
+    route_xhr.onerror = function() {
+        Pebble.sendAppMessage({ 'ROUTE_DATA': 'Unknown Route' });
+    };
+    route_xhr.open('GET', route_url);
+    route_xhr.send();
   }
 });
 

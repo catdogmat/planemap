@@ -3,6 +3,7 @@
 static Window *s_window;
 static Window *s_list_window;
 static Window *s_detail_window;
+static ScrollLayer *s_detail_scroll_layer;
 static TextLayer *s_text_layer;
 static TextLayer *s_detail_text_layer;
 static Layer *s_radar_layer;
@@ -12,6 +13,8 @@ static int s_selected_plane_index = 0;
 static Window *s_splash_window;
 static TextLayer *s_splash_title_layer;
 static TextLayer *s_splash_subtitle_layer;
+
+static char s_route_str[64];
 
 typedef struct __attribute__((__packed__)) {
   uint16_t distance_nm_x10;
@@ -121,7 +124,11 @@ static void detail_window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
 
-  s_detail_text_layer = text_layer_create(GRect(5, 5, bounds.size.w - 10, bounds.size.h - 10));
+  s_detail_scroll_layer = scroll_layer_create(bounds);
+  scroll_layer_set_click_config_onto_window(s_detail_scroll_layer, window);
+  
+  // Create the text layer with a large height limit
+  s_detail_text_layer = text_layer_create(GRect(5, 5, bounds.size.w - 10, 2000));
   text_layer_set_font(s_detail_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD));
   text_layer_set_overflow_mode(s_detail_text_layer, GTextOverflowModeWordWrap);
   
@@ -134,21 +141,41 @@ static void detail_window_load(Window *window) {
     char r_safe[9] = {0}; memcpy(r_safe, p->reg, 8);
 
     snprintf(s_buff, sizeof(s_buff), 
-      "Flight: %s\nType: %s\nReg: %s\nAlt: %ld %s\nSpd: %d %s",
-      f_safe, t_safe, r_safe, (long)p->alt, s_is_metric ? "m" : "ft", (int)p->speed, s_is_metric ? "kmh" : "kts");
+      "Flight: %s\nRoute: %s\nType: %s\nReg: %s\nAlt: %ld %s\nSpd: %d %s",
+      f_safe, s_route_str, t_safe, r_safe, (long)p->alt, s_is_metric ? "m" : "ft", (int)p->speed, s_is_metric ? "kmh" : "kts");
       
     text_layer_set_text(s_detail_text_layer, s_buff);
+    
+    // Resize the text layer and scroll layer content
+    GSize text_size = text_layer_get_content_size(s_detail_text_layer);
+    text_layer_set_size(s_detail_text_layer, GSize(bounds.size.w - 10, text_size.h + 10));
+    scroll_layer_set_content_size(s_detail_scroll_layer, GSize(bounds.size.w, text_size.h + 20));
   }
   
-  layer_add_child(window_layer, text_layer_get_layer(s_detail_text_layer));
+  scroll_layer_add_child(s_detail_scroll_layer, text_layer_get_layer(s_detail_text_layer));
+  layer_add_child(window_layer, scroll_layer_get_layer(s_detail_scroll_layer));
 }
 
 static void detail_window_unload(Window *window) {
   text_layer_destroy(s_detail_text_layer);
+  scroll_layer_destroy(s_detail_scroll_layer);
 }
 
 static void menu_select_callback(MenuLayer *menu_layer, MenuIndex *cell_index, void *data) {
   s_selected_plane_index = cell_index->row;
+  
+  snprintf(s_route_str, sizeof(s_route_str), "Loading...");
+  
+  PlaneData *p = &s_planes[s_selected_plane_index];
+  char f_safe[9] = {0}; 
+  memcpy(f_safe, p->flight, 8);
+  
+  DictionaryIterator *iter;
+  if(app_message_outbox_begin(&iter) == APP_MSG_OK) {
+     dict_write_cstring(iter, MESSAGE_KEY_KEY_REQUEST_ROUTE, f_safe);
+     app_message_outbox_send();
+  }
+
   window_stack_push(s_detail_window, true);
 }
 
@@ -200,6 +227,15 @@ static void prv_inbox_received_handler(DictionaryIterator *iter, void *context) 
   Tuple *status_t = dict_find(iter, MESSAGE_KEY_KEY_STATUS);
   if (status_t) {
     text_layer_set_text(s_text_layer, status_t->value->cstring);
+  }
+
+  Tuple *route_t = dict_find(iter, MESSAGE_KEY_ROUTE_DATA);
+  if (route_t) {
+    snprintf(s_route_str, sizeof(s_route_str), "%s", route_t->value->cstring);
+    if(window_stack_get_top_window() == s_detail_window) {
+       // Refresh detail window if it is currently open
+       detail_window_load(s_detail_window);
+    }
   }
 
   Tuple *planes_t = dict_find(iter, MESSAGE_KEY_PLANES_DATA);

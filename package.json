@@ -36,7 +36,9 @@
       "UNITS_METRIC",
       "OVERRIDE_LOCATION",
       "MANUAL_LAT",
-      "MANUAL_LON"
+      "MANUAL_LON",
+      "KEY_REQUEST_ROUTE",
+      "ROUTE_DATA"
     ],
     "resources": {
       "media": [
