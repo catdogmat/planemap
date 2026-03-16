@@ -1,7 +1,7 @@
 {
   "name": "planemap",
   "author": "CasCasey",
-  "version": "1.5",
+  "version": "1.6",
   "keywords": [
     "pebble-app"
   ],
@@ -40,7 +40,8 @@
       "MANUAL_LAT",
       "MANUAL_LON",
       "KEY_REQUEST_ROUTE",
-      "ROUTE_DATA"
+      "ROUTE_DATA",
+      "MAX_PLANES"
     ],
     "resources": {
       "media": [

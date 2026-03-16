@@ -14,6 +14,7 @@ static TextLayer *s_splash_title_layer;
 static TextLayer *s_splash_subtitle_layer;
 
 static char s_route_str[64];
+static char s_status_str[64];
 
 typedef struct __attribute__((__packed__)) {
   uint16_t distance_nm_x10;
@@ -26,8 +27,8 @@ typedef struct __attribute__((__packed__)) {
   uint16_t speed;
 } PlaneData;
 
+#define MAX_PLANES 50
 
-#define MAX_PLANES 20
 static PlaneData s_planes[MAX_PLANES];
 static int s_num_planes = 0;
 static int s_current_radius = 15;
@@ -38,7 +39,6 @@ static int32_t s_compass_heading = 0;
 static void compass_handler(CompassHeadingData heading_data) {
   if (heading_data.compass_status == CompassStatusDataInvalid) return;
   s_compass_heading = TRIG_MAX_ANGLE - heading_data.magnetic_heading;
-  APP_LOG(APP_LOG_LEVEL_INFO, "Compass heading: %ld, raw: %ld", (long)s_compass_heading, (long)TRIGANGLE_TO_DEG(heading_data.magnetic_heading));
   layer_mark_dirty(s_radar_layer);
 }
 
@@ -245,14 +245,14 @@ static void prv_list_window_unload(Window *window) {
 static void prv_inbox_received_handler(DictionaryIterator *iter, void *context) {
   Tuple *status_t = dict_find(iter, MESSAGE_KEY_KEY_STATUS);
   if (status_t) {
-    text_layer_set_text(s_text_layer, status_t->value->cstring);
+    snprintf(s_status_str, sizeof(s_status_str), "%s", status_t->value->cstring);
+    text_layer_set_text(s_text_layer, s_status_str);
   }
 
   Tuple *route_t = dict_find(iter, MESSAGE_KEY_ROUTE_DATA);
   if (route_t) {
     snprintf(s_route_str, sizeof(s_route_str), "%s", route_t->value->cstring);
     if(window_stack_get_top_window() == s_detail_window) {
-       // Refresh detail window if it is currently open
        detail_window_load(s_detail_window);
     }
   }
@@ -287,10 +287,6 @@ static void prv_inbox_received_handler(DictionaryIterator *iter, void *context) 
     if (s_menu_layer) {
       menu_layer_reload_data(s_menu_layer);
     }
-
-    static char s_buf[32];
-    snprintf(s_buf, sizeof(s_buf), "%d Planes", count);
-    text_layer_set_text(s_text_layer, s_buf);
   }
 }
 
@@ -307,8 +303,10 @@ static void send_zoom_message() {
 }
 
 static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
-  if (s_current_radius <= 50) {
-    if (s_current_radius > 5) s_current_radius -= 5;
+  if (s_current_radius <= 5) {
+    if (s_current_radius > 1) s_current_radius -= 1;
+  } else if (s_current_radius <= 50) {
+    s_current_radius -= 5;
   } else {
     s_current_radius -= 25;
   }
@@ -317,7 +315,9 @@ static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
 }
 
 static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
-  if (s_current_radius < 50) {
+  if (s_current_radius < 5) {
+    s_current_radius += 1;
+  } else if (s_current_radius < 50) {
     s_current_radius += 5;
   } else if (s_current_radius < 250) {
     s_current_radius += 25;
@@ -422,8 +422,8 @@ static void prv_init(void) {
 
   app_message_register_inbox_received(prv_inbox_received_handler);
 
-  const uint32_t inbox_size = 1024;
-  const uint32_t outbox_size = 64;
+  const uint32_t inbox_size = app_message_inbox_size_maximum();
+  const uint32_t outbox_size = app_message_outbox_size_maximum();
   AppMessageResult result = app_message_open(inbox_size, outbox_size);
   if (result != APP_MSG_OK) {
     APP_LOG(APP_LOG_LEVEL_ERROR, "Error opening AppMessage: %d", result);

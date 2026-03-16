@@ -23,6 +23,16 @@ module.exports = [
         "defaultValue": false,
         "label": "Rotate Map",
         "description": "Rotate the map according to the compass direction."
+      },
+      {
+        "type": "slider",
+        "messageKey": "MAX_PLANES",
+        "defaultValue": 20,
+        "label": "Max Planes",
+        "description": "Maximum number of planes to track and display (1-50).",
+        "min": 1,
+        "max": 50,
+        "step": 1
       }
     ]
   },

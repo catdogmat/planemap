@@ -8,7 +8,7 @@ try {
   var saved_radius = localStorage.getItem('current_radius');
   if (saved_radius) {
     var parsed = parseInt(saved_radius, 10);
-    if (!isNaN(parsed) && parsed >= 5 && parsed <= 250) {
+    if (!isNaN(parsed) && parsed >= 1 && parsed <= 250) {
       current_radius = parsed;
     }
   }
@@ -28,6 +28,9 @@ function fetchPlanesWithPos(lat, lon) {
       }
       if (settings.ROTATE_MAP) {
         rotateMap = true;
+      }
+      if (settings.MAX_PLANES !== undefined) {
+        MAX_PLANES = parseInt(settings.MAX_PLANES, 10) || 20;
       }
     }
   } catch (e) {
@@ -72,6 +75,8 @@ function fetchPlanesWithPos(lat, lon) {
     valid_planes.sort(function(a, b) {
       return a._dist - b._dist;
     });
+
+    var total_valid_planes = valid_planes.length;
 
     var buffer = [];
     var count = 0;
@@ -128,11 +133,13 @@ function fetchPlanesWithPos(lat, lon) {
 
          count++;
     }
-    
-    var unit_str = isMetric ? "km" : "nm";
+    var status_str = (total_valid_planes > MAX_PLANES) ? 
+                     count + '* Planes' : 
+                     count + ' Planes';
+
     Pebble.sendAppMessage({ 
       'PLANES_DATA': buffer,
-      'KEY_STATUS': count + ' Planes ' + current_radius + unit_str,
+      'KEY_STATUS': status_str,
       'KEY_CURRENT_RADIUS': current_radius,
       'UNITS_METRIC': isMetric ? 1 : 0,
       'ROTATE_MAP': rotateMap ? 1 : 0
