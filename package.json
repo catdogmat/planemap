@@ -1,7 +1,7 @@
 {
   "name": "planemap",
   "author": "CasCasey",
-  "version": "1.3",
+  "version": "1.4",
   "keywords": [
     "pebble-app"
   ],
@@ -34,6 +34,8 @@
       "KEY_CURRENT_RADIUS",
       "KEY_IS_METRIC",
       "UNITS_METRIC",
+      "KEY_ROTATE_MAP",
+      "ROTATE_MAP",
       "OVERRIDE_LOCATION",
       "MANUAL_LAT",
       "MANUAL_LON",

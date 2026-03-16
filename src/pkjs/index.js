@@ -4,17 +4,30 @@ var clay = new Clay(clayConfig);
 
 var MAX_PLANES = 20;
 var current_radius = 15;
+try {
+  var saved_radius = localStorage.getItem('current_radius');
+  if (saved_radius) {
+    var parsed = parseInt(saved_radius, 10);
+    if (!isNaN(parsed) && parsed >= 5 && parsed <= 250) {
+      current_radius = parsed;
+    }
+  }
+} catch (e) { }
 
 var icaoDict = require('./icao_dict.json');
 
 function fetchPlanesWithPos(lat, lon) {
   var isMetric = false;
+  var rotateMap = false;
   try {
     var claySettingsStr = localStorage.getItem('clay-settings');
     if (claySettingsStr) {
       var settings = JSON.parse(claySettingsStr);
       if (settings.UNITS_METRIC) {
         isMetric = true;
+      }
+      if (settings.ROTATE_MAP) {
+        rotateMap = true;
       }
     }
   } catch (e) {
@@ -38,10 +51,8 @@ function fetchPlanesWithPos(lat, lon) {
       return;
     }
 
-    var buffer = [];
-    var count = 0;
-    
-    for (var i = 0; i < planes.length && count < MAX_PLANES; i++) {
+    var valid_planes = [];
+    for (var i = 0; i < planes.length; i++) {
       var p = planes[i];
       if (!p.lat || !p.lon) continue;
       
@@ -49,6 +60,27 @@ function fetchPlanesWithPos(lat, lon) {
       var dx = (p.lon - lon) * 60 * Math.cos(lat * Math.PI / 180);
       
       var distance = Math.sqrt(dx*dx + dy*dy);
+      
+      if (distance <= fetch_radius_nm) {
+        p._dist = distance;
+        p._dx = dx;
+        p._dy = dy;
+        valid_planes.push(p);
+      }
+    }
+    
+    valid_planes.sort(function(a, b) {
+      return a._dist - b._dist;
+    });
+
+    var buffer = [];
+    var count = 0;
+    
+    for (var i = 0; i < valid_planes.length && count < MAX_PLANES; i++) {
+      var p = valid_planes[i];
+      var distance = p._dist;
+      var dx = p._dx;
+      var dy = p._dy;
       
       var out_dist = isMetric ? (distance * 1.852) : distance;
       var out_alt = (p.alt_baro === "ground") ? 0 : (p.alt_baro || 0);
@@ -63,7 +95,6 @@ function fetchPlanesWithPos(lat, lon) {
       var bearing_deg = Math.round(bearing_rad * 180 / Math.PI);
       if (bearing_deg < 0) bearing_deg += 360;
 
-      if (distance <= fetch_radius_nm) {
          buffer.push(distance_x10 & 0xFF);
          buffer.push((distance_x10 >> 8) & 0xFF);
          
@@ -96,7 +127,6 @@ function fetchPlanesWithPos(lat, lon) {
          buffer.push((gs_int >> 8) & 0xFF);
 
          count++;
-      }
     }
     
     var unit_str = isMetric ? "km" : "nm";
@@ -104,7 +134,12 @@ function fetchPlanesWithPos(lat, lon) {
       'PLANES_DATA': buffer,
       'KEY_STATUS': count + ' Planes ' + current_radius + unit_str,
       'KEY_CURRENT_RADIUS': current_radius,
-      'KEY_IS_METRIC': isMetric ? 1 : 0
+      'UNITS_METRIC': isMetric ? 1 : 0,
+      'ROTATE_MAP': rotateMap ? 1 : 0
+    }, function(e) {
+      console.log('Successfully delivered message with ' + count + ' planes');
+    }, function(e) {
+      console.log('Unable to deliver message with ' + count + ' planes: ' + JSON.stringify(e));
     });
   };
   xhr.open('GET', url);
@@ -144,10 +179,20 @@ function getPlanes() {
 Pebble.addEventListener('appmessage', function(e) {
   var dict = e.payload;
   if (dict.KEY_ZOOM_IN) {
-    if (current_radius > 5) current_radius -= 5;
+    if (current_radius <= 50) {
+      if (current_radius > 5) current_radius -= 5;
+    } else {
+      current_radius -= 25;
+    }
+    try { localStorage.setItem('current_radius', current_radius); } catch(e) {}
     getPlanes();
   } else if (dict.KEY_ZOOM_OUT) {
-    if (current_radius < 50) current_radius += 5;
+    if (current_radius < 50) {
+      current_radius += 5;
+    } else if (current_radius < 250) {
+      current_radius += 25;
+    }
+    try { localStorage.setItem('current_radius', current_radius); } catch(e) {}
     getPlanes();
   } else if (dict.KEY_REQUEST_ROUTE) {
     var callsign = dict.KEY_REQUEST_ROUTE;
@@ -192,8 +237,10 @@ Pebble.addEventListener('webviewclosed', function(e) {
   getPlanes();
 });
 
-Pebble.addEventListener('ready', function() {
-  getPlanes();
+var fetchInterval = null;
 
-  setInterval(getPlanes, 5000);
+Pebble.addEventListener('ready', function() {
+  if (fetchInterval) clearInterval(fetchInterval);
+  getPlanes();
+  fetchInterval = setInterval(getPlanes, 5000);
 });

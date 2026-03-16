@@ -16,6 +16,13 @@ module.exports = [
         "defaultValue": false,
         "label": "Use Metric Units",
         "description": "Switch from nautical miles, feet, and knots to kilometers, meters, and km/h."
+      },
+      {
+        "type": "toggle",
+        "messageKey": "ROTATE_MAP",
+        "defaultValue": false,
+        "label": "Rotate Map",
+        "description": "Rotate the map according to the compass direction."
       }
     ]
   },

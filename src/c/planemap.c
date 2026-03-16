@@ -3,7 +3,6 @@
 static Window *s_window;
 static Window *s_list_window;
 static Window *s_detail_window;
-static ScrollLayer *s_detail_scroll_layer;
 static TextLayer *s_text_layer;
 static TextLayer *s_detail_text_layer;
 static Layer *s_radar_layer;
@@ -33,6 +32,16 @@ static PlaneData s_planes[MAX_PLANES];
 static int s_num_planes = 0;
 static int s_current_radius = 15;
 static bool s_is_metric = false;
+static bool s_rotate_map = false;
+static int32_t s_compass_heading = 0;
+
+static void compass_handler(CompassHeadingData heading_data) {
+  if (heading_data.compass_status == CompassStatusDataInvalid) return;
+  s_compass_heading = heading_data.magnetic_heading;
+  APP_LOG(APP_LOG_LEVEL_INFO, "Compass heading: %ld, raw: %ld", (long)s_compass_heading, (long)TRIGANGLE_TO_DEG(heading_data.magnetic_heading));
+  layer_mark_dirty(s_radar_layer);
+}
+
 static void draw_plane(GContext *ctx, GPoint center, uint16_t heading_deg) {
   int32_t angle = (TRIG_MAX_ANGLE * heading_deg) / 360;
   
@@ -85,10 +94,17 @@ static void radar_update_proc(Layer *layer, GContext *ctx) {
   graphics_context_set_text_color(ctx, GColorGreen);
   
   // Draw N/S/E/W
-  graphics_draw_text(ctx, "N", fonts_get_system_font(FONT_KEY_GOTHIC_14), GRect(center.x - 10, 2, 20, 20), GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
-  graphics_draw_text(ctx, "S", fonts_get_system_font(FONT_KEY_GOTHIC_14), GRect(center.x - 10, bounds.size.h - 18, 20, 20), GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
-  graphics_draw_text(ctx, "W", fonts_get_system_font(FONT_KEY_GOTHIC_14), GRect(2, center.y - 10, 20, 20), GTextOverflowModeWordWrap, GTextAlignmentLeft, NULL);
-  graphics_draw_text(ctx, "E", fonts_get_system_font(FONT_KEY_GOTHIC_14), GRect(bounds.size.w - 22, center.y - 10, 20, 20), GTextOverflowModeWordWrap, GTextAlignmentRight, NULL);
+  for (int i=0; i<4; i++) {
+    int32_t a = (i * TRIG_MAX_ANGLE / 4);
+    if (s_rotate_map) {
+      a -= s_compass_heading;
+    }
+    int r = 75;
+    int tx = center.x + (sin_lookup(a) * r) / TRIG_MAX_RATIO;
+    int ty = center.y - (cos_lookup(a) * r) / TRIG_MAX_RATIO;
+    char *l = (i==0) ? "N" : (i==1) ? "E" : (i==2) ? "S" : "W";
+    graphics_draw_text(ctx, l, fonts_get_system_font(FONT_KEY_GOTHIC_14), GRect(tx - 10, ty - 10, 20, 20), GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+  }
 
   // Draw current radius in corner
   static char s_radius_buf[16];
@@ -104,15 +120,23 @@ static void radar_update_proc(Layer *layer, GContext *ctx) {
   graphics_context_set_stroke_color(ctx, GColorWhite);
   graphics_context_set_text_color(ctx, GColorWhite);
   for (int i = 0; i < s_num_planes; i++) {
-    int px_distance = (s_planes[i].distance_nm_x10 * (72 / s_current_radius)) / 10;
+    int px_distance = (s_planes[i].distance_nm_x10 * 72) / (s_current_radius * 10);
     int32_t b_angle = (TRIG_MAX_ANGLE * s_planes[i].bearing_deg) / 360;
+    if (s_rotate_map) {
+      b_angle -= s_compass_heading;
+    }
     int px_x = center.x + (sin_lookup(b_angle) * px_distance) / TRIG_MAX_RATIO;
     int px_y = center.y - (cos_lookup(b_angle) * px_distance) / TRIG_MAX_RATIO;
     GPoint p = GPoint(px_x, px_y);
     
     if (px_x < -20 || px_x > bounds.size.w + 20 || px_y < -20 || px_y > bounds.size.h + 20) continue;
     
-    draw_plane(ctx, p, s_planes[i].heading);
+    uint16_t rotated_h_deg = s_planes[i].heading;
+    if (s_rotate_map) {
+      int32_t compass_deg = (s_compass_heading * 360) / TRIG_MAX_ANGLE;
+      rotated_h_deg = (s_planes[i].heading + 360 - compass_deg) % 360;
+    }
+    draw_plane(ctx, p, rotated_h_deg);
     
     char flight_buf[9] = {0};
     memcpy(flight_buf, s_planes[i].flight, 8);
@@ -124,12 +148,8 @@ static void detail_window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
 
-  s_detail_scroll_layer = scroll_layer_create(bounds);
-  scroll_layer_set_click_config_onto_window(s_detail_scroll_layer, window);
-  
-  // Create the text layer with a large height limit
-  s_detail_text_layer = text_layer_create(GRect(5, 5, bounds.size.w - 10, 2000));
-  text_layer_set_font(s_detail_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD));
+  s_detail_text_layer = text_layer_create(GRect(5, 5, bounds.size.w - 10, bounds.size.h - 10));
+  text_layer_set_font(s_detail_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18));
   text_layer_set_overflow_mode(s_detail_text_layer, GTextOverflowModeWordWrap);
   
   if(s_selected_plane_index < s_num_planes) {
@@ -146,22 +166,17 @@ static void detail_window_load(Window *window) {
       
     text_layer_set_text(s_detail_text_layer, s_buff);
     
-    // Resize the text layer and scroll layer content
-    GSize text_size = text_layer_get_content_size(s_detail_text_layer);
-    text_layer_set_size(s_detail_text_layer, GSize(bounds.size.w - 10, text_size.h + 10));
-    scroll_layer_set_content_size(s_detail_scroll_layer, GSize(bounds.size.w, text_size.h + 20));
   }
   
-  scroll_layer_add_child(s_detail_scroll_layer, text_layer_get_layer(s_detail_text_layer));
-  layer_add_child(window_layer, scroll_layer_get_layer(s_detail_scroll_layer));
+  layer_add_child(window_layer, text_layer_get_layer(s_detail_text_layer));
 }
 
 static void detail_window_unload(Window *window) {
   text_layer_destroy(s_detail_text_layer);
-  scroll_layer_destroy(s_detail_scroll_layer);
 }
 
 static void menu_select_callback(MenuLayer *menu_layer, MenuIndex *cell_index, void *data) {
+  if (s_num_planes == 0) return;
   s_selected_plane_index = cell_index->row;
   
   snprintf(s_route_str, sizeof(s_route_str), "Loading...");
@@ -180,10 +195,14 @@ static void menu_select_callback(MenuLayer *menu_layer, MenuIndex *cell_index, v
 }
 
 static uint16_t menu_get_num_rows_callback(MenuLayer *menu_layer, uint16_t section_index, void *data) {
-  return s_num_planes;
+  return s_num_planes > 0 ? s_num_planes : 1;
 }
 
 static void menu_draw_row_callback(GContext* ctx, const Layer *cell_layer, MenuIndex *cell_index, void *data) {
+  if (s_num_planes == 0) {
+    menu_cell_basic_draw(ctx, cell_layer, "No planes detected", NULL, NULL);
+    return;
+  }
   if (cell_index->row >= s_num_planes) return;
   
   PlaneData *p = &s_planes[cell_index->row];
@@ -252,9 +271,15 @@ static void prv_inbox_received_handler(DictionaryIterator *iter, void *context) 
       s_current_radius = radius_t->value->int32;
     }
 
-    Tuple *metric_t = dict_find(iter, MESSAGE_KEY_KEY_IS_METRIC);
+    Tuple *metric_t = dict_find(iter, MESSAGE_KEY_UNITS_METRIC);
     if (metric_t) {
       s_is_metric = metric_t->value->int32 == 1;
+    }
+
+    Tuple *rotate_t = dict_find(iter, MESSAGE_KEY_ROTATE_MAP);
+    if (rotate_t) {
+      s_rotate_map = rotate_t->value->int32 == 1;
+      APP_LOG(APP_LOG_LEVEL_INFO, "Received ROTATE_MAP setting: %d", s_rotate_map);
     }
 
     layer_mark_dirty(s_radar_layer);
@@ -282,18 +307,22 @@ static void send_zoom_message(uint32_t key) {
 }
 
 static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
-  if (s_current_radius > 5) {
-    s_current_radius -= 5;
-    layer_mark_dirty(s_radar_layer);
+  if (s_current_radius <= 50) {
+    if (s_current_radius > 5) s_current_radius -= 5;
+  } else {
+    s_current_radius -= 25;
   }
+  layer_mark_dirty(s_radar_layer);
   send_zoom_message(MESSAGE_KEY_KEY_ZOOM_IN);
 }
 
 static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
   if (s_current_radius < 50) {
     s_current_radius += 5;
-    layer_mark_dirty(s_radar_layer);
+  } else if (s_current_radius < 250) {
+    s_current_radius += 25;
   }
+  layer_mark_dirty(s_radar_layer);
   send_zoom_message(MESSAGE_KEY_KEY_ZOOM_OUT);
 }
 
@@ -314,7 +343,7 @@ static void prv_window_load(Window *window) {
   s_text_layer = text_layer_create(GRect(0, 148, bounds.size.w, 20));
   text_layer_set_text(s_text_layer, "Loading...");
   text_layer_set_text_alignment(s_text_layer, GTextAlignmentCenter);
-  text_layer_set_background_color(s_text_layer, GColorClear);
+  text_layer_set_background_color(s_text_layer, GColorBlack);
   text_layer_set_text_color(s_text_layer, GColorWhite);
   layer_add_child(window_layer, text_layer_get_layer(s_text_layer));
 
@@ -399,11 +428,16 @@ static void prv_init(void) {
   if (result != APP_MSG_OK) {
     APP_LOG(APP_LOG_LEVEL_ERROR, "Error opening AppMessage: %d", result);
   }
+  
+  APP_LOG(APP_LOG_LEVEL_INFO, "Initializing compass service unconditionally");
+  compass_service_subscribe(compass_handler);
+  compass_service_set_heading_filter(DEG_TO_TRIGANGLE(2));
 }
 
 static void prv_deinit(void) {
   app_message_deregister_callbacks();
 
+  compass_service_unsubscribe();
   window_destroy(s_window);
   window_destroy(s_list_window);
   window_destroy(s_detail_window);
